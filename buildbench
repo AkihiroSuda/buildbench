@@ -1,0 +1,181 @@
+#!/bin/bash
+
+set -eu -o pipefail
+# set -x
+export LANG=C LC_ALL=C
+cd $(dirname $0)
+
+### Constants
+DOCKER_DAEMON_IMAGE="docker:edge-dind"
+DOCKER_CLIENT_IMAGE="docker:edge"
+BUILDKIT_IMAGE="tonistiigi/buildkit:latest"
+IMG_IMAGE="r.j3ss.co/img:latest"
+BUILDAH_IMAGE="containerbuilding/buildah:latest"
+KANIKO_IMAGE="gcr.io/kaniko-project/executor:latest"
+
+### Common
+function INFO(){
+    echo -e "\e[104m\e[97m[INFO]\e[49m\e[39m $@"
+}
+function bb::volume_name(){
+    echo "buildbench-$1"
+}
+function bb::container_name(){
+    echo "buildbench-$1"
+}
+function bb::dummy_file_name(){
+    echo "buildbench-dummy"
+}
+function bb::test(){
+    local builder="$1"
+    local dir="$2"
+    local csv="$3"
+    local n="$4"
+    INFO "Initializing ${builder}"
+    ${builder}::prune || true
+    ${builder}::init
+    for i in $(seq 1 ${n});do
+        INFO "${i} of ${n}: ${builder}: preparing"
+        rm -f ${dir}/$(bb::dummy_file_name)
+        ${builder}::prepare
+        local desc="${i} of ${n}: ${builder} #1 (clean env)"
+        INFO "${desc}: starting"
+        local begin=$(date +%s)
+        ${builder}::build ${dir}
+        local end=$(date +%s)
+        local took=$((${end}-${begin}))
+        INFO "${desc}: done, took ${took} seconds"
+        echo "${builder}-1,${took},${begin},${end}" >> ${csv}
+        desc="${i} of ${n}: ${builder} #2 (with dummy modification. cache can be potentially used.)"
+        date > ${dir}/$(bb::dummy_file_name)
+        INFO "${desc}: starting"
+        local begin=$(date +%s)
+        ${builder}::build ${dir}
+        local end=$(date +%s)
+        local took=$((${end}-${begin}))
+        INFO "${desc}: done, took ${took} seconds"
+        echo "${builder}-2,${took},${begin},${end}" >> ${csv}
+        INFO "${i} of ${n}: ${builder}: pruning"
+        rm -f ${dir}/$(bb::dummy_file_name)
+        ${builder}::prune
+    done
+}
+
+### Docker
+function docker::init(){
+    docker pull ${DOCKER_DAEMON_IMAGE}
+    docker pull ${DOCKER_CLIENT_IMAGE}
+    INFO "Docker version"
+    docker run --rm ${DOCKER_CLIENT_IMAGE} --version 
+}
+function docker::prepare(){
+    docker volume create $(bb::volume_name docker)
+    docker run --privileged --name $(bb::container_name docker) -d -v $(bb::volume_name docker):/var/lib/docker ${DOCKER_DAEMON_IMAGE}
+}
+function docker::build(){
+    local dir="$1"
+    docker run -v ${dir}:/workspace -w /workspace --rm --link $(bb::container_name docker):docker ${DOCKER_CLIENT_IMAGE} \
+           docker build -t foo .
+}
+function docker::prune(){
+    docker rm -f $(bb::container_name docker)
+    docker volume rm -f $(bb::volume_name docker)
+}
+
+### BuildKit
+function buildkit::init(){
+    docker pull ${BUILDKIT_IMAGE}
+    INFO "BuildKit version"
+    docker run --rm ${BUILDKIT_IMAGE} --version
+}
+function buildkit::prepare(){
+    docker volume create $(bb::volume_name buildkit)
+    docker run --privileged --name $(bb::container_name buildkit) -d -v $(bb::volume_name buildkit):/var/lib/buildkit -p 1234:1234 ${BUILDKIT_IMAGE} \
+           --addr tcp://0.0.0.0:1234
+}
+function buildkit::build(){
+    local dir="$1"
+    docker run \
+           -v ${dir}:/workspace -w /workspace \
+           --rm \
+           --link $(bb::container_name buildkit):buildkit \
+           -e BUILDKIT_HOST=tcp://buildkit:1234 \
+           --entrypoint buildctl \
+           ${BUILDKIT_IMAGE} \
+           build --frontend=dockerfile.v0 --local context=. --local dockerfile=.
+}
+function buildkit::prune(){
+    docker rm -f $(bb::container_name buildkit)
+    docker volume rm -f $(bb::volume_name buildkit)
+}
+
+### img
+function img::init(){
+    docker pull ${IMG_IMAGE}
+    INFO "img version"
+    docker run --rm ${IMG_IMAGE} version
+}
+function img::prepare(){
+    docker volume create $(bb::volume_name img)
+}
+function img::build(){
+    local dir="$1"
+    docker run --privileged -v ${dir}:/workspace -w /workspace --rm -v $(bb::volume_name img):/home/user ${IMG_IMAGE} \
+           build -backend overlayfs -t foo .
+}
+function img::prune(){
+    docker volume rm -f $(bb::volume_name img)
+}
+
+### Buildah
+function buildah::init(){
+    docker pull ${BUILDAH_IMAGE}
+    INFO "Buildah version"
+    docker run --rm ${BUILDAH_IMAGE} buildah version
+}
+function buildah::prepare(){
+    docker volume create $(bb::volume_name buildah)
+}
+function buildah::build(){
+    local dir="$1"
+    docker run --privileged -v ${dir}:/workspace -w /workspace --rm -v $(bb::volume_name buildah):/var/lib/containers/storage ${BUILDAH_IMAGE} \
+           buildah --storage-driver overlay bud -t foo .
+}
+function buildah::prune(){
+    docker volume rm -f $(bb::volume_name buildah)
+}
+
+### kaniko
+function kaniko::init(){
+    docker pull ${KANIKO_IMAGE}
+    INFO "Kaniko version is unknown"
+}
+function kaniko::prepare(){
+    echo NOP > /dev/null
+}
+function kaniko::build(){
+    local dir="$1"
+    docker run -v ${dir}:/workspace --rm ${KANIKO_IMAGE} \
+           --tarPath /dev/null --destination=foo
+}
+function kaniko::prune(){
+    echo NOP > /dev/null
+}
+
+### Main
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 DIR CSV N"
+    exit 1
+fi
+DIR=$(realpath "$1")
+CSV="$2"
+N="$3"
+
+for builder in docker buildkit img buildah kaniko; do
+    disable=DISABLE_$(echo ${builder} | tr a-z A-Z)
+    if [[ ! -z ${!disable-} ]]; then
+        INFO "Skipping ${builder}"
+    else
+        bb::test ${builder} ${DIR} ${CSV} ${N}
+    fi
+done

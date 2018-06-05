@@ -1,0 +1,29 @@
+sudo: required
+dist: trusty
+
+language: generic
+
+services:
+  - docker
+
+before_install:
+  - sudo apt-get install -y realpath
+
+env:
+  matrix:
+    - D=./examples/ex01 CSV=ex01.csv N=5
+    - D=./moby CSV=moby.csv N=1 REPO=https://github.com/moby/moby.git DISABLE_BUILDAH=1 DISABLE_KANIKO=1
+
+# moby/moby is the good example of complex Dockerfile.
+# However, as of June 5, 2018, Buildah and Kaniko does not support `FROM anotherstage`.
+
+script:
+  - |
+    if [ ! -z ${REPO} ]; then
+      git clone ${REPO} ${D}
+      ( cd ${D} ;  git show --summary )
+    fi
+  - echo "travis_fold:start:SCRIPT Testing ${D} ${N} times. CSV=${CSV}"
+  - ./buildbench ${D} ${CSV} ${N}
+  - echo "travis_fold:end:SCRIPT Testing ${D} ${N} times. CSV=${CSV}"
+  - cat ${CSV}
