@@ -40,19 +40,19 @@ function bb::test(){
         ${builder}::prepare
         local desc="${i} of ${n}: ${builder} #1 (clean env)"
         INFO "${desc}: starting"
-        local begin=$(date +%s)
+        local begin=$(date +%s.%N)
         ${builder}::build ${dir}
-        local end=$(date +%s)
-        local took=$((${end}-${begin}))
+        local end=$(date +%s.%N)
+        local took=$(echo ${end}-${begin} | bc)
         INFO "${desc}: done, took ${took} seconds"
         echo "${builder}-1,${took},${begin},${end}" >> ${csv}
         desc="${i} of ${n}: ${builder} #2 (with dummy modification. cache can be potentially used.)"
         date > ${dir}/$(bb::dummy_file_name)
         INFO "${desc}: starting"
-        local begin=$(date +%s)
+        local begin=$(date +%s.%N)
         ${builder}::build ${dir}
-        local end=$(date +%s)
-        local took=$((${end}-${begin}))
+        local end=$(date +%s.%N)
+        local took=$(echo ${end}-${begin} | bc)
         INFO "${desc}: done, took ${took} seconds"
         echo "${builder}-2,${took},${begin},${end}" >> ${csv}
         INFO "${i} of ${n}: ${builder}: pruning"
