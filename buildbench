@@ -122,7 +122,7 @@ function img::build(){
     local dir="$1"
     # drop stdout to avoid Travis 4MB log limit
     docker run --privileged -v ${dir}:/workspace -w /workspace --rm -v $(bb::volume_name img):/home/user ${IMG_IMAGE} \
-           build -backend overlayfs -t foo . > /dev/null
+           build -backend overlayfs -t foo . > /dev/null 2>&1
 }
 function img::prune(){
     docker volume rm -f $(bb::volume_name img)
