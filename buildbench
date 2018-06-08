@@ -170,8 +170,18 @@ fi
 DIR=$(realpath "$1")
 CSV="$2"
 N="$3"
+builders=(docker buildkit img buildah kaniko)
 
-for builder in docker buildkit img buildah kaniko; do
+for builder in ${builders[@]}; do
+    only=ONLY_$(echo ${builder} | tr a-z A-Z)
+    if [[ ! -z ${!only-} ]]; then
+        INFO "Only running ${builder}"
+        bb::test ${builder} ${DIR} ${CSV} ${N}
+        exit
+    fi
+done
+
+for builder in ${builders[@]}; do
     disable=DISABLE_$(echo ${builder} | tr a-z A-Z)
     if [[ ! -z ${!disable-} ]]; then
         INFO "Skipping ${builder}"
