@@ -4,9 +4,10 @@
 
 ## Requirements
 
-* bash
-* realpath
-* Docker
+* `bash`
+* `realpath`
+* `bc`
+* `docker`
 
 ## Usage
 

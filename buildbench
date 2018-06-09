@@ -40,19 +40,19 @@ function bb::test(){
         ${builder}::prepare
         local desc="${i} of ${n}: ${builder} #1 (clean env)"
         INFO "${desc}: starting"
-        local begin=$(date +%s)
+        local begin=$(date +%s.%N)
         ${builder}::build ${dir}
-        local end=$(date +%s)
-        local took=$((${end}-${begin}))
+        local end=$(date +%s.%N)
+        local took=$(echo ${end}-${begin} | bc)
         INFO "${desc}: done, took ${took} seconds"
         echo "${builder}-1,${took},${begin},${end}" >> ${csv}
         desc="${i} of ${n}: ${builder} #2 (with dummy modification. cache can be potentially used.)"
         date > ${dir}/$(bb::dummy_file_name)
         INFO "${desc}: starting"
-        local begin=$(date +%s)
+        local begin=$(date +%s.%N)
         ${builder}::build ${dir}
-        local end=$(date +%s)
-        local took=$((${end}-${begin}))
+        local end=$(date +%s.%N)
+        local took=$(echo ${end}-${begin} | bc)
         INFO "${desc}: done, took ${took} seconds"
         echo "${builder}-2,${took},${begin},${end}" >> ${csv}
         INFO "${i} of ${n}: ${builder}: pruning"
@@ -120,8 +120,9 @@ function img::prepare(){
 }
 function img::build(){
     local dir="$1"
+    # drop stdout to avoid Travis 4MB log limit
     docker run --privileged -v ${dir}:/workspace -w /workspace --rm -v $(bb::volume_name img):/home/user ${IMG_IMAGE} \
-           build -backend overlayfs -t foo .
+           build -backend overlayfs -t foo . > /dev/null 2>&1
 }
 function img::prune(){
     docker volume rm -f $(bb::volume_name img)
@@ -170,8 +171,18 @@ fi
 DIR=$(realpath "$1")
 CSV="$2"
 N="$3"
+builders=(docker buildkit img buildah kaniko)
 
-for builder in docker buildkit img buildah kaniko; do
+for builder in ${builders[@]}; do
+    only=ONLY_$(echo ${builder} | tr a-z A-Z)
+    if [[ ! -z ${!only-} ]]; then
+        INFO "Only running ${builder}"
+        bb::test ${builder} ${DIR} ${CSV} ${N}
+        exit
+    fi
+done
+
+for builder in ${builders[@]}; do
     disable=DISABLE_$(echo ${builder} | tr a-z A-Z)
     if [[ ! -z ${!disable-} ]]; then
         INFO "Skipping ${builder}"
