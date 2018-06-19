@@ -6,12 +6,16 @@ export LANG=C LC_ALL=C
 cd $(dirname $0)
 
 ### Constants
-DOCKER_DAEMON_IMAGE="docker:edge-dind"
-DOCKER_CLIENT_IMAGE="docker:edge"
-BUILDKIT_IMAGE="tonistiigi/buildkit:latest"
-IMG_IMAGE="r.j3ss.co/img:latest"
-BUILDAH_IMAGE="containerbuilding/buildah:latest"
-KANIKO_IMAGE="gcr.io/kaniko-project/executor:latest"
+# May, 2018
+DOCKER_IMAGE="docker:18.05-dind"
+# BuildKit does not have tagged images; git: moby/buildkit@00140b79929a046614feec5985c8e8f56f7501e7 (June 16, 2018)
+BUILDKIT_IMAGE="tonistiigi/buildkit@sha256:38d17109b217c2894063f0bd4b844554901de65add1f9d7cc3b5b73da4f6ab4e"
+# June 13, 2018
+IMG_IMAGE="r.j3ss.co/img:v0.4.6"
+# Buildah does not have tagged images; git: projectatomic/buildah@fc438bb932e891cbe04109cfae1dfbe3c99307a5 (June 15, 2018)
+BUILDAH_IMAGE="containerbuilding/buildah@sha256:b03b04c2480521c9ae05c87f28cc2568a347d009de47f4153d30b41f3bf0ccb8"
+# May, 2018
+KANIKO_IMAGE="gcr.io/kaniko-project/executor:v0.1.0"
 
 ### Common
 function INFO(){
@@ -63,19 +67,19 @@ function bb::test(){
 
 ### Docker
 function docker::init(){
-    docker pull ${DOCKER_DAEMON_IMAGE}
-    docker pull ${DOCKER_CLIENT_IMAGE}
+    docker pull ${DOCKER_IMAGE}
     INFO "Docker version"
-    docker run --rm ${DOCKER_CLIENT_IMAGE} --version 
+    docker run --rm ${DOCKER_IMAGE} docker --version
 }
 function docker::prepare(){
     docker volume create $(bb::volume_name docker)
-    docker run --privileged --name $(bb::container_name docker) -d -v $(bb::volume_name docker):/var/lib/docker ${DOCKER_DAEMON_IMAGE}
+    docker run --privileged --name $(bb::container_name docker) -d -v $(bb::volume_name docker):/var/lib/docker ${DOCKER_IMAGE} \
+           -s overlay2
 }
 function docker::build(){
     local dir="$1"
-    docker run -v ${dir}:/workspace -w /workspace --rm --link $(bb::container_name docker):docker ${DOCKER_CLIENT_IMAGE} \
-           docker build -t foo .
+    docker run -v ${dir}:/workspace -w /workspace --rm --link $(bb::container_name docker):docker -e DOCKER_HOST=tcp://docker:2375 ${DOCKER_IMAGE} \
+           docker build -t foo -q . > /dev/null 2>&1
 }
 function docker::prune(){
     docker rm -f $(bb::container_name docker)
@@ -102,7 +106,7 @@ function buildkit::build(){
            -e BUILDKIT_HOST=tcp://buildkit:1234 \
            --entrypoint buildctl \
            ${BUILDKIT_IMAGE} \
-           build --frontend=dockerfile.v0 --local context=. --local dockerfile=.
+           build --frontend=dockerfile.v0 --local context=. --local dockerfile=. > /dev/null 2>&1
 }
 function buildkit::prune(){
     docker rm -f $(bb::container_name buildkit)
@@ -140,7 +144,7 @@ function buildah::prepare(){
 function buildah::build(){
     local dir="$1"
     docker run --privileged -v ${dir}:/workspace -w /workspace --rm -v $(bb::volume_name buildah):/var/lib/containers/storage ${BUILDAH_IMAGE} \
-           buildah --storage-driver overlay bud -t foo .
+           buildah --storage-driver overlay bud -t foo -q . > /dev/null 2>&1
 }
 function buildah::prune(){
     docker volume rm -f $(bb::volume_name buildah)
@@ -157,7 +161,7 @@ function kaniko::prepare(){
 function kaniko::build(){
     local dir="$1"
     docker run -v ${dir}:/workspace --rm ${KANIKO_IMAGE} \
-           --tarPath /dev/null --destination=foo
+           --tarPath /dev/null --destination=foo > /dev/null 2>&1
 }
 function kaniko::prune(){
     echo NOP > /dev/null
