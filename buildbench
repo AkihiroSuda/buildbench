@@ -6,16 +6,18 @@ export LANG=C LC_ALL=C
 cd $(dirname $0)
 
 ### Constants
-# May, 2018
-DOCKER_IMAGE="docker:18.05-dind"
-# BuildKit does not have tagged images; git: moby/buildkit@00140b79929a046614feec5985c8e8f56f7501e7 (June 16, 2018)
-BUILDKIT_IMAGE="tonistiigi/buildkit@sha256:38d17109b217c2894063f0bd4b844554901de65add1f9d7cc3b5b73da4f6ab4e"
-# June 13, 2018
-IMG_IMAGE="r.j3ss.co/img:v0.4.6"
-# Buildah does not have tagged images; git: projectatomic/buildah@fc438bb932e891cbe04109cfae1dfbe3c99307a5 (June 15, 2018)
-BUILDAH_IMAGE="containerbuilding/buildah@sha256:b03b04c2480521c9ae05c87f28cc2568a347d009de47f4153d30b41f3bf0ccb8"
-# May, 2018
-KANIKO_IMAGE="gcr.io/kaniko-project/executor:v0.1.0"
+# April 11, 2019
+DOCKER_IMAGE="docker:18.09-dind"
+# March 14, 2019
+BUILDKIT_IMAGE="moby/buildkit:v0.4.0"
+# Dec 29, 2018
+IMG_IMAGE="r.j3ss.co/img:v0.5.6"
+# Buildah does not have tagged images; git: containerbuilding/buildah@11e6007adff0f84053761b7df6855cc01d5cdd96 (Jan 5, 2019)
+BUILDAH_IMAGE="containerbuilding/buildah@sha256:bf4af5702e7cab4d0ac1054f686946f1cddbc90a6a2a34dd64fe8f40d0145daf"
+# Feb 8, 2019
+KANIKO_IMAGE="gcr.io/kaniko-project/executor:v0.9.0"
+# Jan 18, 2019
+REGISTRY_IMAGE="registry:2.7.1"
 
 ### Common
 function INFO(){
@@ -153,18 +155,27 @@ function buildah::prune(){
 ### kaniko
 function kaniko::init(){
     docker pull ${KANIKO_IMAGE}
+    docker pull ${REGISTRY_IMAGE}
     INFO "Kaniko version is unknown"
 }
 function kaniko::prepare(){
-    echo NOP > /dev/null
+    docker volume create $(bb::volume_name kaniko)
+    docker run --name $(bb::container_name kaniko-registry) -d -p 5000:5000 ${REGISTRY_IMAGE}
 }
 function kaniko::build(){
     local dir="$1"
-    docker run -v ${dir}:/workspace --rm ${KANIKO_IMAGE} \
-           --tarPath /dev/null --destination=foo > /dev/null 2>&1
+    docker run -v ${dir}:/workspace \
+           -v $(bb::volume_name kaniko):/cache \
+           --rm \
+           --link $(bb::container_name kaniko-registry):kaniko-registry \
+           ${KANIKO_IMAGE} \
+           --context=dir://workspace \
+           --cache=true --cache-dir=/cache \
+           --insecure-registry=kaniko-registry:5000 --destination=kaniko-registry:5000/foo #> /dev/null 2>&1
 }
 function kaniko::prune(){
-    echo NOP > /dev/null
+    docker rm -f $(bb::container_name kaniko-registry)
+    docker volume rm -f $(bb::volume_name kaniko)
 }
 
 ### Main
